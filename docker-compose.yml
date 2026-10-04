@@ -1,0 +1,78 @@
+version: '3.8'
+
+networks:
+  frontend_net:
+    driver: bridge
+  backend_net:
+    driver: bridge
+  db_net:
+    internal: true # PERHATIAN: internal = true menutup total akses ke/dari luar
+
+services:
+  # Database Layer (Isolasi Total)
+  database: 
+    image: postgres:15-alpine
+    container_name: paycore-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: paycore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - db_net
+    # PORT TIDAK DI-PUBLISH KE HOST UNTUK ALASAN KEAMANAN
+
+  # Application Layer - Instance 1
+  app_1:
+    build: .
+    container_name: paycore-app-1
+    environment:
+      PORT: 3000
+      DB_HOST: paycore-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: paycore
+    networks:
+      - backend_net
+      - db_net
+    depends_on:
+      - database
+
+  # Application Layer - Instance 2 (High Availability)
+  app_2:
+    build:
+      context: .
+    container_name: paycore-app-2
+    environment:
+      PORT: 3000
+      DB_HOST: paycore-db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: paycore
+    networks:
+      - backend_net
+      - db_net
+    depends_on:
+      - database
+
+  # Edge Load Balancer & Rate Limiter
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: paycore-haproxy
+    ports:
+      - "80:80"      # Traffic HTTP
+      - "8404:8404"  # HAProxy Stats Dashboard
+    volumes:
+      - ./paycore-infra/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - frontend_net
+      - backend_net
+    depends_on:
+      - app_1
+      - app_2
+
+volumes:
+  pgdata:
